@@ -47,14 +47,28 @@ blueprint:
     sound_duration:
       name: Alarm Sound Duration (seconds)
       description: >
-        The length of your alarm sound file in seconds. Used to time the gap
-        between repeats. Increase slightly if sounds overlap.
+        The length of your alarm sound file in seconds. Used to wait for
+        playback to finish before the next repeat. Supports decimals (e.g. 0.5).
       default: 1
       selector:
         number:
-          min: 1
+          min: 0.1
           max: 30
-          step: 1
+          step: 0.1
+          mode: box
+          unit_of_measurement: seconds
+
+    sound_gap:
+      name: Gap Between Alarm Repeats (seconds)
+      description: >
+        How long to pause between each alarm sound repeat.
+        Supports decimals (e.g. 0.5). Default is 1 second.
+      default: 1
+      selector:
+        number:
+          min: 0.1
+          max: 10
+          step: 0.1
           mode: box
           unit_of_measurement: seconds
 
@@ -105,6 +119,7 @@ variables:
   media_player_entity: !input media_player_entity
   alarm_sound: !input alarm_sound
   sound_duration: !input sound_duration
+  sound_gap: !input sound_gap
   initial_play_count: !input initial_play_count
   repeat_before_announcement: !input repeat_before_announcement
   alert_interval: !input alert_interval
@@ -155,7 +170,7 @@ action:
                         media_content_id: !input alarm_sound
                         media_content_type: music
                     - delay:
-                        seconds: "{{ sound_duration | int + 1 }}"
+                        seconds: "{{ (sound_duration | float) + (sound_gap | float) }}"
 
           # ── SUBSEQUENT ALERTS: loop until door closes ─────────────────────
           - repeat:
@@ -189,7 +204,7 @@ action:
                               media_content_id: !input alarm_sound
                               media_content_type: music
                           - delay:
-                              seconds: "{{ sound_duration | int + 1 }}"
+                              seconds: "{{ (sound_duration | float) + (sound_gap | float) }}"
 
                 # Spoken announcement (skip if name blank or door closed)
                 - if:
