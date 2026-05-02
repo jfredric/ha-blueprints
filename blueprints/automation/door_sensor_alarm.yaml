@@ -37,12 +37,11 @@ blueprint:
           domain: media_player
 
     alarm_sound:
-      name: Alarm Sound URL
+      name: Alarm Sound
       description: >
-        Full URL or local path to the alarm sound file (e.g.
-        /local/sounds/alarm.mp3 or https://example.com/alarm.mp3).
+        Select the alarm sound file from your media library.
       selector:
-        text: {}
+        media: {}
 
     initial_play_count:
       name: Initial Alarm Play Count
@@ -90,7 +89,7 @@ variables:
   door_sensor: !input door_sensor
   announcement_name: !input announcement_name
   media_player_entity: !input media_player_entity
-  alarm_sound: !input alarm_sound
+  alarm_sound_media: !input alarm_sound
   initial_play_count: !input initial_play_count
   repeat_before_announcement: !input repeat_before_announcement
   alert_interval: !input alert_interval
@@ -139,14 +138,18 @@ action:
                       target:
                         entity_id: !input media_player_entity
                       data:
-                        media_content_id: !input alarm_sound
-                        media_content_type: music
+                        media_content_id: "{{ alarm_sound_media.media_content_id }}"
+                        media_content_type: "{{ alarm_sound_media.media_content_type }}"
+                        extra:
+                          title: Alarm
                     # Wait for playback to finish then pause 1 s before next repeat
                     - wait_for_trigger:
                         - platform: state
                           entity_id: !input media_player_entity
-                          attribute: state
                           to: idle
+                        - platform: state
+                          entity_id: !input media_player_entity
+                          to: paused
                       timeout:
                         seconds: 30
                       continue_on_timeout: true
@@ -183,30 +186,42 @@ action:
                             target:
                               entity_id: !input media_player_entity
                             data:
-                              media_content_id: !input alarm_sound
-                              media_content_type: music
+                              media_content_id: "{{ alarm_sound_media.media_content_id }}"
+                              media_content_type: "{{ alarm_sound_media.media_content_type }}"
+                              extra:
+                                title: Alarm
                           # Wait for playback to finish
                           - wait_for_trigger:
                               - platform: state
                                 entity_id: !input media_player_entity
-                                attribute: state
                                 to: idle
+                              - platform: state
+                                entity_id: !input media_player_entity
+                                to: paused
                             timeout:
                               seconds: 30
                             continue_on_timeout: true
                           - delay:
                               seconds: 1
 
-                # Check once more before announcing
-                - condition: state
-                  entity_id: !input door_sensor
-                  state: "on"
-
-                # Spoken announcement: "The <name> is open." (skip if name is blank)
+                # Spoken announcement: "The <name> is open." (skip if name is blank and door still open)
                 - if:
                     - condition: template
-                      value_template: "{{ announcement_name | trim != '' }}"
+                      value_template: >
+                        {{ announcement_name | trim != '' and
+                           is_state(door_sensor, 'on') }}
                   then:
+                    # Wait for any alarm audio to fully finish before speaking
+                    - wait_for_trigger:
+                        - platform: state
+                          entity_id: !input media_player_entity
+                          to: idle
+                        - platform: state
+                          entity_id: !input media_player_entity
+                          to: paused
+                      timeout:
+                        seconds: 30
+                      continue_on_timeout: true
                     - service: tts.speak
                       target:
                         entity_id: !input media_player_entity
