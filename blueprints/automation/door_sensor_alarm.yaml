@@ -37,11 +37,12 @@ blueprint:
           domain: media_player
 
     alarm_sound:
-      name: Alarm Sound
+      name: Alarm Sound URL
       description: >
-        Select the alarm sound file from your media library.
+        Full URL or local path to the alarm sound file (e.g.
+        /local/sounds/alarm.mp3 or https://example.com/alarm.mp3).
       selector:
-        media: {}
+        text: {}
 
     initial_play_count:
       name: Initial Alarm Play Count
@@ -89,7 +90,7 @@ variables:
   door_sensor: !input door_sensor
   announcement_name: !input announcement_name
   media_player_entity: !input media_player_entity
-  alarm_sound_media: !input alarm_sound
+  alarm_sound: !input alarm_sound
   initial_play_count: !input initial_play_count
   repeat_before_announcement: !input repeat_before_announcement
   alert_interval: !input alert_interval
@@ -138,10 +139,8 @@ action:
                       target:
                         entity_id: !input media_player_entity
                       data:
-                        media_content_id: "{{ alarm_sound_media.media_content_id }}"
-                        media_content_type: "{{ alarm_sound_media.media_content_type }}"
-                        extra:
-                          title: Alarm
+                        media_content_id: !input alarm_sound
+                        media_content_type: music
                     # Wait for playback to finish then pause 1 s before next repeat
                     - wait_for_trigger:
                         - platform: state
@@ -184,10 +183,8 @@ action:
                             target:
                               entity_id: !input media_player_entity
                             data:
-                              media_content_id: "{{ alarm_sound_media.media_content_id }}"
-                              media_content_type: "{{ alarm_sound_media.media_content_type }}"
-                              extra:
-                                title: Alarm
+                              media_content_id: !input alarm_sound
+                              media_content_type: music
                           # Wait for playback to finish
                           - wait_for_trigger:
                               - platform: state
