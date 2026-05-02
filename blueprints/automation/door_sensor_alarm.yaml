@@ -1,0 +1,218 @@
+blueprint:
+  name: Door Sensor Alarm Automation
+  description: >
+    Monitors an open/close sensor and plays an alarm sound and/or announces
+    that the named door is open. On initial open, only the alarm sound plays
+    (the specified number of times). On subsequent alerts, the alarm sound
+    precedes a spoken announcement. Resets automatically when the door closes.
+  domain: automation
+  input:
+    door_sensor:
+      name: Door / Window Sensor
+      description: The binary sensor (open/close) to monitor.
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - door
+            - window
+            - garage_door
+            - opening
+
+    announcement_name:
+      name: Announcement Name
+      description: >
+        The friendly name used in the spoken announcement.
+        Announcement format: "The <Announcement Name> is open."
+        Leave blank to disable announcements entirely — only the alarm sound will play.
+      default: ""
+      selector:
+        text: {}
+
+    media_player_entity:
+      name: Audio Source
+      description: The media player to play the alarm sound and announcements on.
+      selector:
+        entity:
+          domain: media_player
+
+    alarm_sound:
+      name: Alarm Sound URL
+      description: >
+        Full URL or local path to the alarm sound file (e.g.
+        /local/sounds/alarm.mp3 or https://example.com/alarm.mp3).
+      selector:
+        text: {}
+
+    initial_play_count:
+      name: Initial Alarm Play Count
+      description: >
+        How many times to play the alarm sound when the door first opens.
+        Set to 0 to suppress the initial alert entirely.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+
+    repeat_before_announcement:
+      name: Alarm Repeats Before Announcement
+      description: >
+        How many times the alarm sound plays before each subsequent
+        announcement is made. Set to 0 to skip the alarm sound on
+        subsequent alerts and go straight to the announcement.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+
+    alert_interval:
+      name: Time Between Alerts (seconds)
+      description: >
+        How long to wait (in seconds) between the end of one alert cycle
+        and the start of the next.
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 3600
+          step: 5
+          mode: slider
+          unit_of_measurement: seconds
+
+variables:
+  # Expose blueprint inputs as template variables
+  door_sensor: !input door_sensor
+  announcement_name: !input announcement_name
+  media_player_entity: !input media_player_entity
+  alarm_sound: !input alarm_sound
+  initial_play_count: !input initial_play_count
+  repeat_before_announcement: !input repeat_before_announcement
+  alert_interval: !input alert_interval
+
+trigger:
+  - platform: state
+    entity_id: !input door_sensor
+    to: "on"   # binary_sensor "on" = open
+    id: door_opened
+
+  - platform: state
+    entity_id: !input door_sensor
+    to: "off"  # binary_sensor "off" = closed
+    id: door_closed
+
+condition: []
+
+action:
+  - choose:
+
+      # ── Door CLOSED ────────────────────────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: door_closed
+        sequence:
+          # Stop any in-progress media and cancel pending repeats
+          - service: media_player.media_stop
+            target:
+              entity_id: !input media_player_entity
+
+      # ── Door OPENED ────────────────────────────────────────────────────────
+      - conditions:
+          - condition: trigger
+            id: door_opened
+        sequence:
+
+          # ── INITIAL OPEN: play alarm N times (skip if count = 0) ──────────
+          - if:
+              - condition: template
+                value_template: "{{ initial_play_count | int > 0 }}"
+            then:
+              - repeat:
+                  count: "{{ initial_play_count | int }}"
+                  sequence:
+                    - service: media_player.play_media
+                      target:
+                        entity_id: !input media_player_entity
+                      data:
+                        media_content_id: !input alarm_sound
+                        media_content_type: music
+                    # Wait for playback to finish then pause 1 s before next repeat
+                    - wait_for_trigger:
+                        - platform: state
+                          entity_id: !input media_player_entity
+                          attribute: state
+                          to: idle
+                      timeout:
+                        seconds: 30
+                      continue_on_timeout: true
+                    - delay:
+                        seconds: 1
+
+          # ── SUBSEQUENT ALERTS: loop until door closes ─────────────────────
+          - repeat:
+              while:
+                # Keep looping as long as the door is still open
+                - condition: state
+                  entity_id: !input door_sensor
+                  state: "on"
+              sequence:
+
+                # Wait the configured interval between alert cycles
+                - delay:
+                    seconds: "{{ alert_interval | int }}"
+
+                # Check again – door may have closed during the delay
+                - condition: state
+                  entity_id: !input door_sensor
+                  state: "on"
+
+                # Play alarm sound N times before the announcement (skip if count = 0)
+                - if:
+                    - condition: template
+                      value_template: "{{ repeat_before_announcement | int > 0 }}"
+                  then:
+                    - repeat:
+                        count: "{{ repeat_before_announcement | int }}"
+                        sequence:
+                          - service: media_player.play_media
+                            target:
+                              entity_id: !input media_player_entity
+                            data:
+                              media_content_id: !input alarm_sound
+                              media_content_type: music
+                          # Wait for playback to finish
+                          - wait_for_trigger:
+                              - platform: state
+                                entity_id: !input media_player_entity
+                                attribute: state
+                                to: idle
+                            timeout:
+                              seconds: 30
+                            continue_on_timeout: true
+                          - delay:
+                              seconds: 1
+
+                # Check once more before announcing
+                - condition: state
+                  entity_id: !input door_sensor
+                  state: "on"
+
+                # Spoken announcement: "The <name> is open." (skip if name is blank)
+                - if:
+                    - condition: template
+                      value_template: "{{ announcement_name | trim != '' }}"
+                  then:
+                    - service: tts.speak
+                      target:
+                        entity_id: !input media_player_entity
+                      data:
+                        message: "The {{ announcement_name }} is open."
+                        cache: false
+
+mode: restart   # Restart if the door is closed then re-opened mid-cycle
+max_exceeded: silent
