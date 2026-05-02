@@ -29,6 +29,17 @@ blueprint:
       selector:
         text: {}
 
+    tts_engine:
+      name: TTS Engine
+      description: >
+        The text-to-speech engine entity to use for announcements (e.g. tts.piper,
+        tts.google_translate). Leave the Announcement Name blank if you don't want
+        announcements and this field won't be used.
+      default: ""
+      selector:
+        entity:
+          domain: tts
+
     media_player_entity:
       name: Audio Source
       description: The media player to play the alarm sound and announcements on.
@@ -117,6 +128,7 @@ variables:
   door_sensor: !input door_sensor
   announcement_name: !input announcement_name
   media_player_entity: !input media_player_entity
+  tts_engine: !input tts_engine
   alarm_sound: !input alarm_sound
   sound_duration: !input sound_duration
   sound_gap: !input sound_gap
@@ -215,8 +227,9 @@ action:
                   then:
                     - service: tts.speak
                       target:
-                        entity_id: !input media_player_entity
+                        entity_id: !input tts_engine
                       data:
+                        media_player_entity_id: !input media_player_entity
                         message: "The {{ announcement_name }} is open."
                         cache: false
 
