@@ -26,15 +26,16 @@ blueprint:
     scene_on_entity:
       name: On Paddle Scene Entity
       description: >
-        The central scene sensor entity for the on paddle.
-        Usually named sensor.{device_name}_central_scene or similar.
+        The central scene event entity for the on paddle.
+        Usually named event.{device_name}_scene_001 or similar.
+        Must be enabled in HA — disabled by default on most Z-Wave devices.
       selector:
         entity:
-          domain: sensor
+          domain: event
 
     scene_on_value:
       name: On Paddle Scene Value
-      description: The value the scene sensor reports when the on paddle is pressed
+      description: The event_type attribute value reported when the on paddle is pressed
       default: KeyPressed
       selector:
         select:
@@ -48,16 +49,17 @@ blueprint:
     scene_off_entity:
       name: Off Paddle Scene Entity
       description: >
-        The central scene sensor entity for the off paddle.
+        The central scene event entity for the off paddle.
+        Usually named event.{device_name}_scene_002 or similar.
         If your switch uses a single combined scene entity enter the same entity as above
         and select a different value below to distinguish the paddles.
       selector:
         entity:
-          domain: sensor
+          domain: event
 
     scene_off_value:
       name: Off Paddle Scene Value
-      description: The value the scene sensor reports when the off paddle is pressed
+      description: The event_type attribute value reported when the off paddle is pressed
       default: KeyPressed
       selector:
         select:
@@ -120,6 +122,10 @@ blueprint:
 variables:
   lux_sensor: !input lux_sensor
   lux_threshold: !input lux_threshold
+  scene_on_entity: !input scene_on_entity
+  scene_off_entity: !input scene_off_entity
+  scene_on_value: !input scene_on_value
+  scene_off_value: !input scene_off_value
   lux_ok: >
     {% if lux_sensor == "" %}
       true
@@ -128,16 +134,14 @@ variables:
     {% endif %}
 
 trigger:
-  # On paddle pressed
+  # Any press on the on paddle entity — value checked in conditions
   - platform: state
     entity_id: !input scene_on_entity
-    to: !input scene_on_value
     id: manual_on
 
-  # Off paddle pressed
+  # Any press on the off paddle entity — value checked in conditions
   - platform: state
     entity_id: !input scene_off_entity
-    to: !input scene_off_value
     id: manual_off
 
   # Motion detected
@@ -157,10 +161,13 @@ trigger:
 action:
   - choose:
 
-      # ── On paddle pressed → set override, turn light on ──
+      # ── On paddle pressed with correct value → set override, turn light on ──
       - conditions:
           - condition: trigger
             id: manual_on
+          - condition: template
+            value_template: >
+              {{ state_attr(scene_on_entity, 'event_type') == scene_on_value }}
         sequence:
           - service: input_boolean.turn_on
             target:
@@ -169,10 +176,13 @@ action:
             target:
               entity_id: !input light_entity
 
-      # ── Off paddle pressed → clear override, turn light off ──
+      # ── Off paddle pressed with correct value → clear override, turn light off ──
       - conditions:
           - condition: trigger
             id: manual_off
+          - condition: template
+            value_template: >
+              {{ state_attr(scene_off_entity, 'event_type') == scene_off_value }}
         sequence:
           - service: input_boolean.turn_off
             target:
