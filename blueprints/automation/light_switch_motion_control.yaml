@@ -1,9 +1,9 @@
 blueprint:
-  name: "Outdoor Motion Light (Dusk-to-Dawn)"
+  name: "Light Switch Motion Control"
   description: >
     Turns a light on when motion is detected and light level is below a threshold.
     Works with any numeric light sensor — percentage or raw lux.
-    Enter a threshold that matches your sensor's unit (e.g. 70 for 70%, or 50 for 50 lx).
+    If no sensor is configured the light will trigger on motion alone.
     Auto-off triggers after N seconds of no motion.
     Manual-on locks the light on until manually turned off.
   domain: automation
@@ -33,8 +33,11 @@ blueprint:
           unit_of_measurement: seconds
 
     lux_sensor:
-      name: Light Level Sensor
-      description: Any numeric sensor — percentage-based or raw lux
+      name: Light Level Sensor (optional)
+      description: >
+        Any numeric sensor — percentage or raw lux.
+        Leave blank to trigger on motion alone regardless of light level.
+      default: ""
       selector:
         entity:
           domain: sensor
@@ -44,6 +47,7 @@ blueprint:
       description: >
         Light activates when the sensor reads at or below this value.
         Match the unit of your sensor — e.g. 70 for a 0–100% sensor, or 50 for a lux sensor.
+        Ignored if no sensor is configured.
       default: 70
       selector:
         number:
@@ -62,6 +66,14 @@ variables:
   lux_sensor: !input lux_sensor
   lux_threshold: !input lux_threshold
   manual_override_helper: !input manual_override_helper
+  # True when sensor is configured AND reading is at or below threshold.
+  # If no sensor is configured this always evaluates to true (motion-only mode).
+  lux_ok: >
+    {% if lux_sensor == "" %}
+      true
+    {% else %}
+      {{ states(lux_sensor) | float(0) <= lux_threshold | float(70) }}
+    {% endif %}
 
 trigger:
   - platform: state
@@ -89,7 +101,7 @@ trigger:
 action:
   - choose:
 
-      # ── Motion started → turn on if below threshold and not overridden ──
+      # ── Motion started → turn on if lux_ok and not overridden ──
       - conditions:
           - condition: trigger
             id: motion_on
@@ -97,8 +109,7 @@ action:
             entity_id: !input manual_override_helper
             state: "off"
           - condition: template
-            value_template: >
-              {{ states(lux_sensor) | float(0) <= lux_threshold | float(70) }}
+            value_template: "{{ lux_ok }}"
         sequence:
           - service: homeassistant.turn_on
             target:
