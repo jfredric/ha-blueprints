@@ -1,0 +1,140 @@
+blueprint:
+  name: "Outdoor Motion Light (Dusk-to-Dawn)"
+  description: >
+    Turns a light on when motion is detected and light level is below a threshold.
+    Works with any numeric light sensor — percentage or raw lux.
+    Enter a threshold that matches your sensor's unit (e.g. 70 for 70%, or 50 for 50 lx).
+    Auto-off triggers after N seconds of no motion.
+    Manual-on locks the light on until manually turned off.
+  domain: automation
+  input:
+    light_switch:
+      name: Light Switch / Entity
+      description: The light or switch to control
+      selector:
+        entity:
+          domain: [light, switch]
+
+    motion_sensor:
+      name: Motion Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+
+    auto_off_seconds:
+      name: Motion Auto-off Time
+      description: Seconds after motion clears before the light turns off
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 3600
+          unit_of_measurement: seconds
+
+    lux_sensor:
+      name: Light Level Sensor
+      description: Any numeric sensor — percentage-based or raw lux
+      selector:
+        entity:
+          domain: sensor
+
+    lux_threshold:
+      name: Light Level Threshold
+      description: >
+        Light activates when the sensor reads at or below this value.
+        Match the unit of your sensor — e.g. 70 for a 0–100% sensor, or 50 for a lux sensor.
+      default: 70
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+
+    manual_override_helper:
+      name: Manual Override Helper (input_boolean)
+      description: A toggle helper that tracks whether the switch was manually turned on
+      selector:
+        entity:
+          domain: input_boolean
+
+variables:
+  lux_sensor: !input lux_sensor
+  lux_threshold: !input lux_threshold
+  manual_override_helper: !input manual_override_helper
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+    id: motion_on
+
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "off"
+    for:
+      seconds: !input auto_off_seconds
+    id: motion_off
+
+  - platform: state
+    entity_id: !input light_switch
+    to: "on"
+    id: manual_on
+
+  - platform: state
+    entity_id: !input light_switch
+    to: "off"
+    id: manual_off
+
+action:
+  - choose:
+
+      # ── Motion started → turn on if below threshold and not overridden ──
+      - conditions:
+          - condition: trigger
+            id: motion_on
+          - condition: state
+            entity_id: !input manual_override_helper
+            state: "off"
+          - condition: template
+            value_template: >
+              {{ states(lux_sensor) | float(0) <= lux_threshold | float(70) }}
+        sequence:
+          - service: homeassistant.turn_on
+            target:
+              entity_id: !input light_switch
+
+      # ── Motion cleared for N seconds → turn off if in auto mode ──
+      - conditions:
+          - condition: trigger
+            id: motion_off
+          - condition: state
+            entity_id: !input manual_override_helper
+            state: "off"
+        sequence:
+          - service: homeassistant.turn_off
+            target:
+              entity_id: !input light_switch
+
+      # ── Manual ON → set override flag ──
+      - conditions:
+          - condition: trigger
+            id: manual_on
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input manual_override_helper
+
+      # ── Manual OFF → clear override flag, return to auto mode ──
+      - conditions:
+          - condition: trigger
+            id: manual_off
+          - condition: state
+            entity_id: !input manual_override_helper
+            state: "on"
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input manual_override_helper
+
+mode: parallel
