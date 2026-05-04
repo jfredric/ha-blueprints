@@ -1,0 +1,220 @@
+blueprint:
+  name: "Light Switch Motion Control"
+  description: >
+    Controls a light via motion with optional dusk-to-dawn light level gating.
+    Physical switch presses are read directly from Z-Wave central scene entities
+    so manual on/off is always unambiguous.
+    Manual-on locks the light on until manually turned off.
+    Manual-off resets to motion/lux auto mode.
+
+    Scene entities are typically disabled by default — enable them first in
+    Settings → Devices → your switch → Enable entity.
+
+    If your switch uses a single combined scene entity, enter it in both the
+    on and off entity fields and select different values to distinguish the paddles.
+    WARNING: entering the same entity AND the same value for both on and off
+    will cause unpredictable behavior.
+  domain: automation
+  input:
+    light_entity:
+      name: Light Entity
+      description: The light or switch entity to control (the relay/load)
+      selector:
+        entity:
+          domain: [light, switch]
+
+    scene_on_entity:
+      name: On Paddle Scene Entity
+      description: >
+        The central scene event entity for the on paddle.
+        Usually named event.{device_name}_scene_001 or similar.
+        Must be enabled in HA — disabled by default on most Z-Wave devices.
+      selector:
+        entity:
+          domain: event
+
+    scene_on_value:
+      name: On Paddle Scene Value
+      description: The event_type attribute value reported when the on paddle is pressed
+      default: KeyPressed
+      selector:
+        select:
+          options:
+            - KeyPressed
+            - KeyPressed2x
+            - KeyPressed3x
+            - KeyHeldDown
+            - KeyReleased
+
+    scene_off_entity:
+      name: Off Paddle Scene Entity
+      description: >
+        The central scene event entity for the off paddle.
+        Usually named event.{device_name}_scene_002 or similar.
+        If your switch uses a single combined scene entity enter the same entity as above
+        and select a different value below to distinguish the paddles.
+      selector:
+        entity:
+          domain: event
+
+    scene_off_value:
+      name: Off Paddle Scene Value
+      description: The event_type attribute value reported when the off paddle is pressed
+      default: KeyPressed
+      selector:
+        select:
+          options:
+            - KeyPressed
+            - KeyPressed2x
+            - KeyPressed3x
+            - KeyHeldDown
+            - KeyReleased
+
+    motion_sensor:
+      name: Motion Sensor
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+
+    auto_off_seconds:
+      name: Motion Auto-off Time
+      description: Seconds after motion clears before the light turns off
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 3600
+          unit_of_measurement: seconds
+
+    lux_sensor:
+      name: Light Level Sensor (optional)
+      description: >
+        Any numeric sensor — percentage or raw lux.
+        Leave blank to trigger on motion alone regardless of light level.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    lux_threshold:
+      name: Light Level Threshold
+      description: >
+        Light activates when the sensor reads at or below this value.
+        Match the unit of your sensor — e.g. 70 for a 0–100% sensor, or 50 for a lux sensor.
+        Ignored if no sensor is configured.
+      default: 70
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+
+    manual_override_helper:
+      name: Manual Override Helper (input_boolean)
+      description: >
+        A toggle helper that tracks manual override state.
+        Create one in Settings → Helpers → Toggle for each instance of this blueprint.
+      selector:
+        entity:
+          domain: input_boolean
+
+variables:
+  lux_sensor: !input lux_sensor
+  lux_threshold: !input lux_threshold
+  scene_on_entity: !input scene_on_entity
+  scene_off_entity: !input scene_off_entity
+  scene_on_value: !input scene_on_value
+  scene_off_value: !input scene_off_value
+  lux_ok: >
+    {% if lux_sensor == "" %}
+      true
+    {% else %}
+      {{ states(lux_sensor) | float(0) <= lux_threshold | float(70) }}
+    {% endif %}
+
+trigger:
+  # Any press on the on paddle entity — value checked in conditions
+  - platform: state
+    entity_id: !input scene_on_entity
+    id: manual_on
+
+  # Any press on the off paddle entity — value checked in conditions
+  - platform: state
+    entity_id: !input scene_off_entity
+    id: manual_off
+
+  # Motion detected
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "on"
+    id: motion_on
+
+  # Motion cleared for N seconds
+  - platform: state
+    entity_id: !input motion_sensor
+    to: "off"
+    for:
+      seconds: !input auto_off_seconds
+    id: motion_off
+
+action:
+  - choose:
+
+      # ── On paddle pressed with correct value → set override, turn light on ──
+      - conditions:
+          - condition: trigger
+            id: manual_on
+          - condition: template
+            value_template: >
+              {{ state_attr(scene_on_entity, 'event_type') == scene_on_value }}
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input manual_override_helper
+          - service: homeassistant.turn_on
+            target:
+              entity_id: !input light_entity
+
+      # ── Off paddle pressed with correct value → clear override, turn light off ──
+      - conditions:
+          - condition: trigger
+            id: manual_off
+          - condition: template
+            value_template: >
+              {{ state_attr(scene_off_entity, 'event_type') == scene_off_value }}
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input manual_override_helper
+          - service: homeassistant.turn_off
+            target:
+              entity_id: !input light_entity
+
+      # ── Motion started → turn on if lux_ok and not overridden ──
+      - conditions:
+          - condition: trigger
+            id: motion_on
+          - condition: state
+            entity_id: !input manual_override_helper
+            state: "off"
+          - condition: template
+            value_template: "{{ lux_ok }}"
+        sequence:
+          - service: homeassistant.turn_on
+            target:
+              entity_id: !input light_entity
+
+      # ── Motion cleared for N seconds → turn off if in auto mode ──
+      - conditions:
+          - condition: trigger
+            id: motion_off
+          - condition: state
+            entity_id: !input manual_override_helper
+            state: "off"
+        sequence:
+          - service: homeassistant.turn_off
+            target:
+              entity_id: !input light_entity
+
+mode: parallel

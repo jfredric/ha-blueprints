@@ -21,7 +21,7 @@ Each blueprint has a one-click import button. Alternatively, copy any blueprint'
 | Blueprint | Description | Import |
 |---|---|---|
 | [Door Sensor Alarm](blueprints/automation/door_sensor_alarm.yaml) | Monitors an open/close sensor and plays an alarm sound and/or announces that the named door is open. Configurable repeat counts, alert intervals, and TTS announcement. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?url=https://raw.githubusercontent.com/jfredric/ha-blueprints/main/blueprints/automation/door_sensor_alarm.yaml) |
-
+| [Light Switch Motion Control](blueprints/automation/light_switch_motion_control.yaml) | Controls a light via motion detection with optional dusk-to-dawn light level gating. Reads physical paddle presses from Z-Wave central scene event entities for reliable manual override detection. | [![Import](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?url=https://raw.githubusercontent.com/jfredric/ha-blueprints/main/blueprints/automation/light_switch_motion_control.yaml) |
 ---
 
 ## Requirements
@@ -38,13 +38,12 @@ ha-blueprints/
 ├── README.md
 ├── blueprints/
 │   └── automation/
-│       └── door_sensor_alarm.yaml
+│       ├── door_sensor_alarm.yaml
+│       └── light_switch_motion_control.yaml
 └── docs/
-    └── door_sensor_alarm.md
+    ├── door_sensor_alarm.md
+    └── light_switch_motion_control.md
 ```
-
 ---
-
 ## Issues & Feedback
-
 If a blueprint isn't working as expected, open an [issue](../../issues) with your HA version, the blueprint name, and a description of the problem.
