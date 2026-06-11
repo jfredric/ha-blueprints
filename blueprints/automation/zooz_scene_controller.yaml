@@ -256,11 +256,6 @@ variables:
 
 trigger_variables:
   scene_controller: !input scene_controller
-  main_entity: >
-    {{ device_entities(scene_controller)
-       | reject('search', 'indicator|button_|_scene_')
-       | select('match', '^(switch|light)\\..*')
-       | list | first | default('') }}
   upper_left_action: !input upper_left_action
   upper_left_status_entity: !input upper_left_status_entity
   upper_right_action: !input upper_right_action
@@ -279,11 +274,31 @@ trigger:
       command_class_name: Central Scene
     id: scene_press
 
-  # Main LED sync when relay/dimmer state changes
-  - platform: state
-    entity_id: "{{ main_entity }}"
+  # Main LED sync when relay/dimmer state changes (device triggers — entity_id
+  # cannot be templated from device_entities in blueprint state triggers)
+  - platform: device
+    device_id: !input scene_controller
+    domain: switch
+    type: turned_on
     id: led_main
-    enabled: "{{ main_entity != '' }}"
+
+  - platform: device
+    device_id: !input scene_controller
+    domain: switch
+    type: turned_off
+    id: led_main
+
+  - platform: device
+    device_id: !input scene_controller
+    domain: light
+    type: turned_on
+    id: led_main
+
+  - platform: device
+    device_id: !input scene_controller
+    domain: light
+    type: turned_off
+    id: led_main
 
   # Scene button LED sync when configured target/status entities change
   - platform: state
