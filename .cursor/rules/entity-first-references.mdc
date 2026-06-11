@@ -1,0 +1,43 @@
+---
+description: Prefer entity references over device references in blueprints
+alwaysApply: true
+---
+
+# Entity-First References
+
+Home Assistant devices get replaced when they fail. Entity-based configuration survives hardware swaps — users re-point inputs to the new entity instead of reconfiguring a whole device graph.
+
+## Blueprint Inputs
+
+Use `entity` selectors for anything that triggers or acts on a specific thing:
+
+```yaml
+# ✅ GOOD — survives device replacement
+door_sensor:
+  selector:
+    entity:
+      domain: binary_sensor
+      device_class: door
+
+# ❌ BAD — breaks when the physical device is swapped
+door_sensor:
+  selector:
+    device:
+      integration: zwave_js
+```
+
+Prefer `entity_id: !input my_entity` in triggers, conditions, and actions — not device IDs or device-scoped selectors.
+
+## When Device Selectors Are Acceptable
+
+Use `device` selectors only when the blueprint genuinely needs device-level behavior that cannot be expressed per-entity (rare). If you reach for a device selector, document why entities are insufficient.
+
+## Naming and Documentation
+
+- Name inputs `*_entity` (e.g. `light_entity`, `motion_sensor`, `media_player_entity`)
+- In specs and READMEs, refer to "the motion sensor entity" not "the motion sensor device"
+- When setup docs mention finding entities, point users to the entity list on the device page — not the device ID itself
+
+## Migration Benefit
+
+After replacing hardware, the user updates one entity input. Device-based blueprints force re-import or full reconfiguration because device registry entries do not carry over.
