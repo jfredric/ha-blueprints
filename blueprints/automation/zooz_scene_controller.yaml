@@ -233,6 +233,18 @@ variables:
   open_states: ["on", "open", "opening", "unlocked", "playing"]
   closed_states: ["off", "closed", "closing", "locked", "idle", "paused"]
 
+  # Inputs captured as variables so they are accessible in the led_state
+  # event trigger condition (trigger_variables scope not needed since we
+  # handle filtering in the action).
+  upper_left_target: !input upper_left_target_entity
+  upper_left_status: !input upper_left_status_entity
+  upper_right_target: !input upper_right_target_entity
+  upper_right_status: !input upper_right_status_entity
+  lower_left_target: !input lower_left_target_entity
+  lower_left_status: !input lower_left_status_entity
+  lower_right_target: !input lower_right_target_entity
+  lower_right_status: !input lower_right_status_entity
+
   # property_key matches Z-Wave central scene numbering (Scene 001–004)
   buttons:
     - id: upper_left
@@ -276,47 +288,13 @@ trigger:
     event_type: state_changed
     id: led_main
 
-  # Scene button LED sync — fires when target or status entities change state.
-  # Blank !input entities are safely ignored by HA (trigger never fires).
-  - platform: state
-    entity_id: !input upper_left_status_entity
+  # Scene button LED sync — watches all state_changed events and filters to
+  # configured target/status entities in the action condition. This avoids
+  # the save-time validation error caused by empty string entity IDs in
+  # platform: state triggers.
+  - platform: event
+    event_type: state_changed
     id: led_state
-    alias: upper_left
-
-  - platform: state
-    entity_id: !input upper_left_target_entity
-    id: led_state
-    alias: upper_left
-
-  - platform: state
-    entity_id: !input upper_right_status_entity
-    id: led_state
-    alias: upper_right
-
-  - platform: state
-    entity_id: !input upper_right_target_entity
-    id: led_state
-    alias: upper_right
-
-  - platform: state
-    entity_id: !input lower_left_status_entity
-    id: led_state
-    alias: lower_left
-
-  - platform: state
-    entity_id: !input lower_left_target_entity
-    id: led_state
-    alias: lower_left
-
-  - platform: state
-    entity_id: !input lower_right_status_entity
-    id: led_state
-    alias: lower_right
-
-  - platform: state
-    entity_id: !input lower_right_target_entity
-    id: led_state
-    alias: lower_right
 
   - platform: homeassistant
     event: start
@@ -391,7 +369,7 @@ action:
                   - service: homeassistant.toggle
                     target:
                       entity_id: "{{ btn.target }}"
-          # LED update is handled by led_state triggers reacting to entity
+          # LED update is handled by led_state trigger reacting to entity
           # state changes — no LED update needed here.
 
       # ── Main LED (color only — Parameter 1 set manually once) ────────────
@@ -422,9 +400,24 @@ action:
       - conditions:
           - condition: trigger
             id: led_state
+          - condition: template
+            value_template: >
+              {% set e = trigger.event.data.entity_id %}
+              {{ e in [
+                upper_left_target, upper_left_status,
+                upper_right_target, upper_right_status,
+                lower_left_target, lower_left_status,
+                lower_right_target, lower_right_status
+              ] }}
         sequence:
           - variables:
-              btn: "{{ buttons | selectattr('id', 'eq', trigger.alias) | first }}"
+              changed_entity: "{{ trigger.event.data.entity_id }}"
+              btn: >
+                {% set e = trigger.event.data.entity_id %}
+                {% set matched = buttons | selectattr('status', 'eq', e) | list %}
+                {% set matched = matched if matched | length > 0
+                   else buttons | selectattr('target', 'eq', e) | list %}
+                {{ matched[0] if matched | length > 0 else {} }}
               led_entity: "{{ btn.status if btn.status != '' else btn.target }}"
               led_state: "{{ states(led_entity) if btn.action != 'automation' else 'automation' }}"
           - choose:
