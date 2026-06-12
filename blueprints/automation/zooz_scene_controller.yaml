@@ -8,15 +8,17 @@ blueprint:
     Right) with an action and optional target. LED status for scene buttons can
     use a separate status entity when control and sensor differ (e.g. garage doors).
 
-    Light buttons: single tap toggles, double tap turns on (useful for groups).
+    Light buttons: single tap toggles, double tap turns on (useful for groups
+    where some lights may already be on manually).
     Automations and entity toggles respond to single tap only.
 
-    LED colors: lights white/red; automations blue; open/close green/yellow;
-    disabled buttons off. Main LED tracks the device's relay/dimmer automatically
-    (Parameter 1 → Always ON once on device page; blueprint updates color only).
+    LED colors: lights white/on, red/off; automations always blue; open/unlocked
+    yellow; closed/locked green; disabled buttons off. Main LED tracks the
+    device's relay/dimmer automatically (set Parameter 1 → Always ON on the
+    device page; this blueprint updates color only).
 
     Prerequisites: enable scene event entities on the device page. Parameter 23
-    (Disable LED Flash On Setting Change) — optional; set to Disable if LED
+    (Disable LED Flash On Setting Change) is optional — set to Disable if LED
     update flashes bother you.
   domain: automation
   homeassistant:
@@ -48,7 +50,8 @@ blueprint:
           name: Action
           description: >
             Single tap behavior. Light buttons also support double tap to turn
-            on (useful for groups). Other actions are single tap only.
+            on all lights (useful for groups where some may already be on).
+            Automations and entity toggles respond to single tap only.
           default: none
           selector:
             select:
@@ -65,8 +68,8 @@ blueprint:
         upper_left_target_entity:
           name: Target Entity
           description: >
-            Light/group/switch to toggle, automation to trigger, or entity to
-            toggle. Ignored when Action is Disabled.
+            Light/group to toggle, automation to trigger, or entity to toggle.
+            Ignored when Action is Disabled.
           default: ""
           selector:
             entity:
@@ -84,7 +87,8 @@ blueprint:
           name: LED Status Entity (optional)
           description: >
             Entity whose state drives the LED color. Leave blank to use the
-            target entity. Use a separate sensor when control and status differ.
+            target entity. Useful when control and status are different devices
+            (e.g. a garage door opener vs. a door sensor).
           default: ""
           selector:
             entity:
@@ -212,7 +216,9 @@ blueprint:
 variables:
   scene_controller: !input scene_controller
 
-  # Relay/dimmer entity on the selected device — used for main LED tracking
+  # Relay/dimmer entity on the selected device — used for main LED tracking.
+  # Excludes indicator, button, and scene entities to isolate the primary
+  # switch or light entity.
   main_entity: >
     {{ device_entities(scene_controller)
        | reject('search', 'indicator|button_|_scene_')
@@ -254,17 +260,6 @@ variables:
       target: !input lower_right_target_entity
       status: !input lower_right_status_entity
 
-trigger_variables:
-  scene_controller: !input scene_controller
-  upper_left_action: !input upper_left_action
-  upper_left_status_entity: !input upper_left_status_entity
-  upper_right_action: !input upper_right_action
-  upper_right_status_entity: !input upper_right_status_entity
-  lower_left_action: !input lower_left_action
-  lower_left_status_entity: !input lower_left_status_entity
-  lower_right_action: !input lower_right_action
-  lower_right_status_entity: !input lower_right_status_entity
-
 trigger:
   # All central scene button presses from the selected device
   - platform: event
@@ -274,68 +269,54 @@ trigger:
       command_class_name: Central Scene
     id: scene_press
 
-  # Main LED sync when relay/dimmer state changes (device triggers — entity_id
-  # cannot be templated from device_entities in blueprint state triggers)
-  - platform: device
-    device_id: !input scene_controller
-    domain: switch
-    type: changed_states
+  # Main LED sync — watches all state_changed events and filters to main_entity
+  # in the action condition. Device triggers can't use templated entity IDs so
+  # this event-based approach is required.
+  - platform: event
+    event_type: state_changed
     id: led_main
 
-  - platform: device
-    device_id: !input scene_controller
-    domain: light
-    type: changed_states
-    id: led_main
-
-  # Scene button LED sync when configured target/status entities change
+  # Scene button LED sync — fires when target or status entities change state.
+  # Blank !input entities are safely ignored by HA (trigger never fires).
   - platform: state
     entity_id: !input upper_left_status_entity
     id: led_state
     alias: upper_left
-    enabled: "{{ upper_left_action != 'none' and upper_left_status_entity != '' }}"
 
   - platform: state
     entity_id: !input upper_left_target_entity
     id: led_state
     alias: upper_left
-    enabled: "{{ upper_left_action != 'none' and upper_left_status_entity == '' }}"
 
   - platform: state
     entity_id: !input upper_right_status_entity
     id: led_state
     alias: upper_right
-    enabled: "{{ upper_right_action != 'none' and upper_right_status_entity != '' }}"
 
   - platform: state
     entity_id: !input upper_right_target_entity
     id: led_state
     alias: upper_right
-    enabled: "{{ upper_right_action != 'none' and upper_right_status_entity == '' }}"
 
   - platform: state
     entity_id: !input lower_left_status_entity
     id: led_state
     alias: lower_left
-    enabled: "{{ lower_left_action != 'none' and lower_left_status_entity != '' }}"
 
   - platform: state
     entity_id: !input lower_left_target_entity
     id: led_state
     alias: lower_left
-    enabled: "{{ lower_left_action != 'none' and lower_left_status_entity == '' }}"
 
   - platform: state
     entity_id: !input lower_right_status_entity
     id: led_state
     alias: lower_right
-    enabled: "{{ lower_right_action != 'none' and lower_right_status_entity != '' }}"
 
   - platform: state
     entity_id: !input lower_right_target_entity
     id: led_state
     alias: lower_right
-    enabled: "{{ lower_right_action != 'none' and lower_right_status_entity == '' }}"
 
   - platform: homeassistant
     event: start
@@ -370,6 +351,7 @@ action:
                 {% set matched = buttons | selectattr('property_key', 'eq', scene_key) | list %}
                 {{ matched[0] if matched | length > 0 else {} }}
           - choose:
+              # Light toggle — single tap
               - conditions:
                   - condition: template
                     value_template: >
@@ -379,6 +361,7 @@ action:
                   - service: homeassistant.toggle
                     target:
                       entity_id: "{{ btn.target }}"
+              # Light toggle — double tap turns on
               - conditions:
                   - condition: template
                     value_template: >
@@ -388,6 +371,7 @@ action:
                   - service: homeassistant.turn_on
                     target:
                       entity_id: "{{ btn.target }}"
+              # Automation trigger — single tap
               - conditions:
                   - condition: template
                     value_template: >
@@ -397,6 +381,7 @@ action:
                   - service: automation.trigger
                     target:
                       entity_id: "{{ btn.target }}"
+              # Entity toggle — single tap
               - conditions:
                   - condition: template
                     value_template: >
@@ -406,105 +391,17 @@ action:
                   - service: homeassistant.toggle
                     target:
                       entity_id: "{{ btn.target }}"
-          - if:
-              - condition: template
-                value_template: "{{ btn.action is defined }}"
-            then:
-              - delay:
-                  milliseconds: 500
-              - variables:
-                  led_entity: "{{ btn.status if btn.status != '' else btn.target }}"
-                  led_state: >
-                    {{ states(led_entity) if btn.action != 'automation' else 'automation' }}
-              - choose:
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ btn.action == 'none' }}"
-                    sequence:
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                          value: "2"
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ btn.action == 'automation' }}"
-                    sequence:
-                      - parallel:
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                              value: "3"
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + color_offset | int }}"
-                              value: "1"
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + brightness_offset | int }}"
-                              value: "{{ led_brightness }}"
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ btn.action == 'light_toggle' }}"
-                    sequence:
-                      - parallel:
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                              value: "3"
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + color_offset | int }}"
-                              value: >
-                                {% if led_state in open_states %}0{% else %}3{% endif %}
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + brightness_offset | int }}"
-                              value: "{{ led_brightness }}"
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ btn.action == 'entity_toggle' }}"
-                    sequence:
-                      - parallel:
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                              value: "3"
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + color_offset | int }}"
-                              value: >
-                                {% if led_state in closed_states %}2
-                                {% elif led_state in open_states %}5
-                                {% else %}3{% endif %}
-                          - service: zwave_js.set_config_parameter
-                            target:
-                              device_id: !input scene_controller
-                            data:
-                              parameter: "{{ btn.button_id | int + brightness_offset | int }}"
-                              value: "{{ led_brightness }}"
+          # LED update is handled by led_state triggers reacting to entity
+          # state changes — no LED update needed here.
 
       # ── Main LED (color only — Parameter 1 set manually once) ────────────
       - conditions:
           - condition: trigger
             id: led_main
+          - condition: template
+            value_template: >
+              {{ main_entity != ''
+                 and trigger.event.data.entity_id == main_entity }}
         sequence:
           - parallel:
               - service: zwave_js.set_config_parameter
