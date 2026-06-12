@@ -279,25 +279,13 @@ trigger:
   - platform: device
     device_id: !input scene_controller
     domain: switch
-    type: turned_on
-    id: led_main
-
-  - platform: device
-    device_id: !input scene_controller
-    domain: switch
-    type: turned_off
+    type: changed_states
     id: led_main
 
   - platform: device
     device_id: !input scene_controller
     domain: light
-    type: turned_on
-    id: led_main
-
-  - platform: device
-    device_id: !input scene_controller
-    domain: light
-    type: turned_off
+    type: changed_states
     id: led_main
 
   # Scene button LED sync when configured target/status entities change
