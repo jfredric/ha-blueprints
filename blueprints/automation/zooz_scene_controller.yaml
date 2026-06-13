@@ -264,30 +264,50 @@ trigger:
       command_class_name: Central Scene
     id: scene_press
 
-  # Scene button LED sync — one trigger per button watching the status entity
-  # when set, otherwise the target entity. Defaults to input_boolean.none for
-  # disabled/unconfigured buttons so HA does not reject empty entity IDs at
-  # save time. The action gates on btn.action != 'none' so the placeholder
-  # never drives any real behavior.
+  # Two triggers per button — one for status entity, one for target entity.
+  # The action resolves which is the authoritative LED source via led_entity.
+  # Both default to input_boolean.none so HA does not reject empty entity IDs
+  # at save time. The alias suffix (_status/_target) lets the action identify
+  # which entity fired and look up the correct button.
   - platform: state
     entity_id: !input upper_left_status_entity
     id: led_state
-    alias: upper_left
+    alias: upper_left_status
+
+  - platform: state
+    entity_id: !input upper_left_target_entity
+    id: led_state
+    alias: upper_left_target
 
   - platform: state
     entity_id: !input upper_right_status_entity
     id: led_state
-    alias: upper_right
+    alias: upper_right_status
+
+  - platform: state
+    entity_id: !input upper_right_target_entity
+    id: led_state
+    alias: upper_right_target
 
   - platform: state
     entity_id: !input lower_left_status_entity
     id: led_state
-    alias: lower_left
+    alias: lower_left_status
+
+  - platform: state
+    entity_id: !input lower_left_target_entity
+    id: led_state
+    alias: lower_left_target
 
   - platform: state
     entity_id: !input lower_right_status_entity
     id: led_state
-    alias: lower_right
+    alias: lower_right_status
+
+  - platform: state
+    entity_id: !input lower_right_target_entity
+    id: led_state
+    alias: lower_right_target
 
   - platform: homeassistant
     event: start
@@ -373,11 +393,15 @@ action:
             id: led_state
         sequence:
           - variables:
-              btn: "{{ buttons | selectattr('id', 'eq', trigger.alias) | first }}"
+              # Strip _status/_target suffix to get the button id
+              btn_id: "{{ trigger.alias | regex_replace('_(status|target)$', '') }}"
+              btn: "{{ buttons | selectattr('id', 'eq', btn_id) | first }}"
               led_entity: >
                 {{ btn.status if btn.status != 'input_boolean.none'
                    else btn.target }}
-              led_state: "{{ states(led_entity) if btn.action != 'automation' else 'automation' }}"
+              led_state: >
+                {{ states(led_entity) | lower
+                   if btn.action != 'automation' else 'automation' }}
           - choose:
               - conditions:
                   - condition: template
@@ -521,7 +545,7 @@ action:
                             led_entity: >
                               {{ repeat.item.status if repeat.item.status != 'input_boolean.none'
                                  else repeat.item.target }}
-                            led_state: "{{ states(led_entity) }}"
+                            led_state: "{{ states(led_entity) | lower }}"
                         - parallel:
                             - service: zwave_js.set_config_parameter
                               target:
@@ -550,7 +574,7 @@ action:
                             led_entity: >
                               {{ repeat.item.status if repeat.item.status != 'input_boolean.none'
                                  else repeat.item.target }}
-                            led_state: "{{ states(led_entity) }}"
+                            led_state: "{{ states(led_entity) | lower }}"
                         - parallel:
                             - service: zwave_js.set_config_parameter
                               target:
