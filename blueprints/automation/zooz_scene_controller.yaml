@@ -17,9 +17,13 @@ blueprint:
 
     Main button LED is configured directly on the device — no automation needed.
 
-    Prerequisites: enable scene event entities on the device page. Parameter 23
-    (Disable LED Flash On Setting Change) is optional — set to Disable if LED
-    update flashes bother you.
+    Prerequisites:
+    - Enable scene event entities on the device page.
+    - Create a Toggle helper named "Blueprint Placeholder"
+      (entity ID: input_boolean.blueprint_placeholder) — used as a safe default
+      for unused button inputs so HA does not reject empty entity IDs at save time.
+    - Parameter 23 (Disable LED Flash On Setting Change) is optional — set to
+      Disable if LED update flashes bother you.
   domain: automation
   homeassistant:
     min_version: 2024.6.0
@@ -70,7 +74,7 @@ blueprint:
           description: >
             Light/group to toggle, automation to trigger, or entity to toggle.
             Ignored when Action is Disabled.
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
               domain:
@@ -89,7 +93,7 @@ blueprint:
             Entity whose state drives the LED color. Leave blank to use the
             target entity. Useful when control and status are different devices
             (e.g. a garage door opener vs. a door sensor).
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
 
@@ -114,7 +118,7 @@ blueprint:
 
         upper_right_target_entity:
           name: Target Entity
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
               domain:
@@ -129,7 +133,7 @@ blueprint:
 
         upper_right_status_entity:
           name: LED Status Entity (optional)
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
 
@@ -154,7 +158,7 @@ blueprint:
 
         lower_left_target_entity:
           name: Target Entity
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
               domain:
@@ -169,7 +173,7 @@ blueprint:
 
         lower_left_status_entity:
           name: LED Status Entity (optional)
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
 
@@ -194,7 +198,7 @@ blueprint:
 
         lower_right_target_entity:
           name: Target Entity
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
               domain:
@@ -209,7 +213,7 @@ blueprint:
 
         lower_right_status_entity:
           name: LED Status Entity (optional)
-          default: ""
+          default: "input_boolean.blueprint_placeholder"
           selector:
             entity:
 
@@ -223,16 +227,6 @@ variables:
 
   open_states: ["on", "open", "opening", "unlocked", "playing"]
   closed_states: ["off", "closed", "closing", "locked", "idle", "paused"]
-
-  # Flat variables for use in the led_state condition filter
-  upper_left_target: !input upper_left_target_entity
-  upper_left_status: !input upper_left_status_entity
-  upper_right_target: !input upper_right_target_entity
-  upper_right_status: !input upper_right_status_entity
-  lower_left_target: !input lower_left_target_entity
-  lower_left_status: !input lower_left_status_entity
-  lower_right_target: !input lower_right_target_entity
-  lower_right_status: !input lower_right_status_entity
 
   # property_key matches Z-Wave central scene numbering (Scene 001–004)
   buttons:
@@ -270,12 +264,29 @@ trigger:
       command_class_name: Central Scene
     id: scene_press
 
-  # Scene button LED sync — watches all state_changed events and filters to
-  # configured target/status entities in the action condition. Avoids the
-  # save-time validation error from empty string entity IDs in platform:state.
-  - platform: event
-    event_type: state_changed
+  # Scene button LED sync — one trigger per button watching the resolved LED
+  # entity. Status entity is used when set, otherwise falls back to target.
+  # Defaults to input_boolean.blueprint_placeholder for disabled/unconfigured
+  # buttons so HA does not reject empty entity IDs at save time.
+  - platform: state
+    entity_id: !input upper_left_status_entity
     id: led_state
+    alias: upper_left
+
+  - platform: state
+    entity_id: !input upper_right_status_entity
+    id: led_state
+    alias: upper_right
+
+  - platform: state
+    entity_id: !input lower_left_status_entity
+    id: led_state
+    alias: lower_left
+
+  - platform: state
+    entity_id: !input lower_right_status_entity
+    id: led_state
+    alias: lower_right
 
   - platform: homeassistant
     event: start
@@ -315,7 +326,8 @@ action:
                   - condition: template
                     value_template: >
                       {{ btn.action | default('none') == 'light_toggle'
-                         and btn.target | default('') != '' and value_raw == 0 }}
+                         and btn.target | default('') != 'input_boolean.blueprint_placeholder'
+                         and value_raw == 0 }}
                 sequence:
                   - service: homeassistant.toggle
                     target:
@@ -325,7 +337,8 @@ action:
                   - condition: template
                     value_template: >
                       {{ btn.action | default('none') == 'light_toggle'
-                         and btn.target | default('') != '' and value_raw == 3 }}
+                         and btn.target | default('') != 'input_boolean.blueprint_placeholder'
+                         and value_raw == 3 }}
                 sequence:
                   - service: homeassistant.turn_on
                     target:
@@ -335,7 +348,8 @@ action:
                   - condition: template
                     value_template: >
                       {{ btn.action | default('none') == 'automation'
-                         and btn.target | default('') != '' and value_raw == 0 }}
+                         and btn.target | default('') != 'input_boolean.blueprint_placeholder'
+                         and value_raw == 0 }}
                 sequence:
                   - service: automation.trigger
                     target:
@@ -345,36 +359,24 @@ action:
                   - condition: template
                     value_template: >
                       {{ btn.action | default('none') == 'entity_toggle'
-                         and btn.target | default('') != '' and value_raw == 0 }}
+                         and btn.target | default('') != 'input_boolean.blueprint_placeholder'
+                         and value_raw == 0 }}
                 sequence:
                   - service: homeassistant.toggle
                     target:
                       entity_id: "{{ btn.target }}"
-          # LED update handled by led_state trigger reacting to entity
-          # state changes — no LED update needed here.
 
       # ── Scene button LED (state change) ──────────────────────────────────
       - conditions:
           - condition: trigger
             id: led_state
-          - condition: template
-            value_template: >
-              {% set e = trigger.event.data.entity_id %}
-              {{ e in [
-                upper_left_target, upper_left_status,
-                upper_right_target, upper_right_status,
-                lower_left_target, lower_left_status,
-                lower_right_target, lower_right_status
-              ] and trigger.event.data.new_state is not none }}
         sequence:
           - variables:
-              btn: >
-                {% set e = trigger.event.data.entity_id %}
-                {% set matched = buttons | selectattr('status', 'eq', e) | list %}
-                {% set matched = matched if matched | length > 0
-                   else buttons | selectattr('target', 'eq', e) | list %}
-                {{ matched[0] if matched | length > 0 else {} }}
-              led_entity: "{{ btn.status if btn.status != '' else btn.target }}"
+              btn: "{{ buttons | selectattr('id', 'eq', trigger.alias) | first }}"
+              led_entity: >
+                {{ btn.status
+                   if btn.status != 'input_boolean.blueprint_placeholder'
+                   else btn.target }}
               led_state: "{{ states(led_entity) if btn.action != 'automation' else 'automation' }}"
           - choose:
               - conditions:
@@ -517,7 +519,9 @@ action:
                       sequence:
                         - variables:
                             led_entity: >
-                              {{ repeat.item.status if repeat.item.status != '' else repeat.item.target }}
+                              {{ repeat.item.status
+                                 if repeat.item.status != 'input_boolean.blueprint_placeholder'
+                                 else repeat.item.target }}
                             led_state: "{{ states(led_entity) }}"
                         - parallel:
                             - service: zwave_js.set_config_parameter
@@ -545,7 +549,9 @@ action:
                       sequence:
                         - variables:
                             led_entity: >
-                              {{ repeat.item.status if repeat.item.status != '' else repeat.item.target }}
+                              {{ repeat.item.status
+                                 if repeat.item.status != 'input_boolean.blueprint_placeholder'
+                                 else repeat.item.target }}
                             led_state: "{{ states(led_entity) }}"
                         - parallel:
                             - service: zwave_js.set_config_parameter
