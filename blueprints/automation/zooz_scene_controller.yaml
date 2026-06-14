@@ -19,11 +19,14 @@ blueprint:
 
     Prerequisites:
     - Enable scene event entities on the device page.
+    - Enable LED indicator mode and color entities for each button on the device page.
     - Create a Toggle helper named "None" (entity ID: input_boolean.none) — used
       as a safe default for unused button inputs so HA does not reject empty
       entity IDs at save time. Do not delete this helper.
     - Parameter 23 (Disable LED Flash On Setting Change) is optional — set to
       Disable if LED update flashes bother you.
+    - Parameter 27 (Disable LED Flash On Button Press) is optional — set to
+      Disable if LED flashes on button press bother you.
   domain: automation
   homeassistant:
     min_version: 2024.6.0
@@ -220,10 +223,9 @@ blueprint:
 variables:
   scene_controller: !input scene_controller
 
-  toggle_offset: 1
-  color_offset: 6
-  brightness_offset: 11
-  led_brightness: "1"
+  # Device name slug used to build LED select entity IDs dynamically
+  device_name: >
+    {{ device_attr(scene_controller, 'name') | lower | replace(' ', '_') }}
 
   open_states: ["on", "open", "opening", "unlocked", "playing"]
   closed_states: ["off", "closed", "closing", "locked", "idle", "paused"]
@@ -256,7 +258,9 @@ variables:
       status: !input lower_right_status_entity
 
 trigger:
-  # All central scene button presses from the selected device
+  # All central scene button presses from the selected device.
+  # Deduplication of double Z-Wave notifications (firmware 10.50+) is handled
+  # in the action via a 1-second last_triggered guard.
   - platform: event
     event_type: zwave_js_value_notification
     event_data:
@@ -264,11 +268,9 @@ trigger:
       command_class_name: Central Scene
     id: scene_press
 
-  # Two triggers per button — one for status entity, one for target entity.
-  # The action resolves which is the authoritative LED source via led_entity.
-  # Both default to input_boolean.none so HA does not reject empty entity IDs
-  # at save time. The alias suffix (_status/_target) lets the action identify
-  # which entity fired and look up the correct button.
+  # Scene button LED sync — two triggers per button, one for status entity
+  # and one for target entity. Both default to input_boolean.none so HA does
+  # not reject empty entity IDs at save time.
   - platform: state
     entity_id: !input upper_left_status_entity
     id: led_state
@@ -323,6 +325,10 @@ action:
       - conditions:
           - condition: trigger
             id: scene_press
+          # Deduplicate double Z-Wave notifications from firmware 10.50+
+          - condition: template
+            value_template: >
+              {{ (now() - this.attributes.last_triggered).total_seconds() > 1 }}
         sequence:
           - variables:
               scene_key: >
@@ -393,7 +399,6 @@ action:
             id: led_state
         sequence:
           - variables:
-              # Strip _status/_target suffix to get the button id
               btn_id: "{{ trigger.alias | regex_replace('_(status|target)$', '') }}"
               btn: "{{ buttons | selectattr('id', 'eq', btn_id) | first }}"
               led_entity: >
@@ -402,90 +407,41 @@ action:
               led_state: >
                 {{ states(led_entity) | lower
                    if btn.action != 'automation' else 'automation' }}
+              led_color: >
+                {% if btn.action == 'automation' %}
+                  Blue
+                {% elif btn.action == 'light_toggle' %}
+                  {% if led_state in open_states %}White{% else %}Red{% endif %}
+                {% elif btn.action == 'entity_toggle' %}
+                  {% if led_state in closed_states %}Green
+                  {% elif led_state in open_states %}Yellow
+                  {% else %}Red{% endif %}
+                {% endif %}
           - choose:
               - conditions:
                   - condition: template
                     value_template: "{{ btn.action == 'none' }}"
                 sequence:
-                  - service: zwave_js.set_config_parameter
+                  - service: select.select_option
                     target:
-                      device_id: !input scene_controller
+                      entity_id: "select.{{ device_name }}_led_indicator_button_{{ btn.button_id }}"
                     data:
-                      parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                      value: "2"
+                      option: "Always off"
               - conditions:
                   - condition: template
-                    value_template: "{{ btn.action == 'automation' }}"
+                    value_template: "{{ btn.action != 'none' }}"
                 sequence:
                   - parallel:
-                      - service: zwave_js.set_config_parameter
+                      - service: select.select_option
                         target:
-                          device_id: !input scene_controller
+                          entity_id: "select.{{ device_name }}_led_indicator_button_{{ btn.button_id }}"
                         data:
-                          parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                          value: "3"
-                      - service: zwave_js.set_config_parameter
+                          option: "Always on"
+                      - service: select.select_option
                         target:
-                          device_id: !input scene_controller
+                          entity_id: "select.{{ device_name }}_led_indicator_color_button_{{ btn.button_id }}"
                         data:
-                          parameter: "{{ btn.button_id | int + color_offset | int }}"
-                          value: "1"
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + brightness_offset | int }}"
-                          value: "{{ led_brightness }}"
-              - conditions:
-                  - condition: template
-                    value_template: "{{ btn.action == 'light_toggle' }}"
-                sequence:
-                  - parallel:
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                          value: "3"
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + color_offset | int }}"
-                          value: >
-                            {% if led_state in open_states %}0{% else %}3{% endif %}
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + brightness_offset | int }}"
-                          value: "{{ led_brightness }}"
-              - conditions:
-                  - condition: template
-                    value_template: "{{ btn.action == 'entity_toggle' }}"
-                sequence:
-                  - parallel:
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + toggle_offset | int }}"
-                          value: "3"
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + color_offset | int }}"
-                          value: >
-                            {% if led_state in closed_states %}2
-                            {% elif led_state in open_states %}5
-                            {% else %}3{% endif %}
-                      - service: zwave_js.set_config_parameter
-                        target:
-                          device_id: !input scene_controller
-                        data:
-                          parameter: "{{ btn.button_id | int + brightness_offset | int }}"
-                          value: "{{ led_brightness }}"
+                          option: "{{ led_color }}"
 
       # ── Startup / reload: refresh all scene button LEDs ──────────────────
       - conditions:
@@ -508,95 +464,43 @@ action:
                         - condition: template
                           value_template: "{{ repeat.item.action == 'none' }}"
                       sequence:
-                        - service: zwave_js.set_config_parameter
+                        - service: select.select_option
                           target:
-                            device_id: !input scene_controller
+                            entity_id: "select.{{ device_name }}_led_indicator_button_{{ repeat.item.button_id }}"
                           data:
-                            parameter: "{{ repeat.item.button_id | int + toggle_offset | int }}"
-                            value: "2"
+                            option: "Always off"
                     - conditions:
                         - condition: template
-                          value_template: "{{ repeat.item.action == 'automation' }}"
-                      sequence:
-                        - parallel:
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + toggle_offset | int }}"
-                                value: "3"
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + color_offset | int }}"
-                                value: "1"
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + brightness_offset | int }}"
-                                value: "{{ led_brightness }}"
-                    - conditions:
-                        - condition: template
-                          value_template: "{{ repeat.item.action == 'light_toggle' }}"
+                          value_template: "{{ repeat.item.action != 'none' }}"
                       sequence:
                         - variables:
                             led_entity: >
                               {{ repeat.item.status if repeat.item.status != 'input_boolean.none'
                                  else repeat.item.target }}
-                            led_state: "{{ states(led_entity) | lower }}"
+                            led_state: >
+                              {{ states(led_entity) | lower
+                                 if repeat.item.action != 'automation' else 'automation' }}
+                            led_color: >
+                              {% if repeat.item.action == 'automation' %}
+                                Blue
+                              {% elif repeat.item.action == 'light_toggle' %}
+                                {% if led_state in open_states %}White{% else %}Red{% endif %}
+                              {% elif repeat.item.action == 'entity_toggle' %}
+                                {% if led_state in closed_states %}Green
+                                {% elif led_state in open_states %}Yellow
+                                {% else %}Red{% endif %}
+                              {% endif %}
                         - parallel:
-                            - service: zwave_js.set_config_parameter
+                            - service: select.select_option
                               target:
-                                device_id: !input scene_controller
+                                entity_id: "select.{{ device_name }}_led_indicator_button_{{ repeat.item.button_id }}"
                               data:
-                                parameter: "{{ repeat.item.button_id | int + toggle_offset | int }}"
-                                value: "3"
-                            - service: zwave_js.set_config_parameter
+                                option: "Always on"
+                            - service: select.select_option
                               target:
-                                device_id: !input scene_controller
+                                entity_id: "select.{{ device_name }}_led_indicator_color_button_{{ repeat.item.button_id }}"
                               data:
-                                parameter: "{{ repeat.item.button_id | int + color_offset | int }}"
-                                value: >
-                                  {% if led_state in open_states %}0{% else %}3{% endif %}
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + brightness_offset | int }}"
-                                value: "{{ led_brightness }}"
-                    - conditions:
-                        - condition: template
-                          value_template: "{{ repeat.item.action == 'entity_toggle' }}"
-                      sequence:
-                        - variables:
-                            led_entity: >
-                              {{ repeat.item.status if repeat.item.status != 'input_boolean.none'
-                                 else repeat.item.target }}
-                            led_state: "{{ states(led_entity) | lower }}"
-                        - parallel:
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + toggle_offset | int }}"
-                                value: "3"
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + color_offset | int }}"
-                                value: >
-                                  {% if led_state in closed_states %}2
-                                  {% elif led_state in open_states %}5
-                                  {% else %}3{% endif %}
-                            - service: zwave_js.set_config_parameter
-                              target:
-                                device_id: !input scene_controller
-                              data:
-                                parameter: "{{ repeat.item.button_id | int + brightness_offset | int }}"
-                                value: "{{ led_brightness }}"
+                                option: "{{ led_color }}"
 
 mode: queued
 max_exceeded: silent
