@@ -408,7 +408,7 @@ action:
                 {{ states(led_entity) | lower
                    if btn.action != 'automation' else 'automation' }}
               led_color: >
-                {% if btn.action == 'automation' %}3
+                {% if btn.action == 'automation' %}1
                 {% elif btn.action == 'light_toggle' %}
                   {% if led_state in open_states %}0{% else %}3{% endif %}
                 {% elif btn.action == 'entity_toggle' %}
@@ -490,7 +490,7 @@ action:
                               {{ states(led_entity) | lower
                                  if repeat.item.action != 'automation' else 'automation' }}
                             led_color: >
-                              {% if repeat.item.action == 'automation' %}3
+                              {% if repeat.item.action == 'automation' %}1
                               {% elif repeat.item.action == 'light_toggle' %}
                                 {% if led_state in open_states %}0{% else %}3{% endif %}
                               {% elif repeat.item.action == 'entity_toggle' %}
